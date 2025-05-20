@@ -53,7 +53,8 @@ contract CommunityContract {
     event ItemAdded(uint256 indexed itemId, bytes32 itemHash, uint256 initialPrice, uint256 minimalPrice, uint256 depreciationRate, uint256 depreciationInterval, uint256 taxRate);
     event ItemRented(uint256 indexed itemId, address indexed renter, uint256 price);
     event ItemReleased(uint256 indexed itemId, address indexed renter);
-
+    event CitizenDepositReceived(address indexed citizenAddress, uint256 amount);
+    
     error ErrorItemDoesNotExist(uint256 itemId);
     error ErrorInsufficientBalanceToRent(uint256 required, uint256 available);
     error ErrorPaymentFailed();
@@ -74,7 +75,9 @@ contract CommunityContract {
         require(_minimalPrice <= _initialPrice, "Minimal price cannot be greater than initial price");
         require(_depreciationRate > 0, "Depreciation rate must be greater than 0");
         require(_depreciationInterval > 0, "Depreciation interval must be greater than 0");
-        
+        require(_taxRate >= 0, "Tax rate must be greater than or equal to 0");
+        require(_taxRate <= 100, "Tax rate must be less than or equal to 100");
+
         uint256 itemId = itemCount;
         items[itemId] = Item({
             itemHash: _itemHash,
@@ -133,8 +136,7 @@ contract CommunityContract {
             itemId: _itemId,
             rentedFrom: block.timestamp,
             rentedUntil: 0,
-            price: msg.value,
-            lastTaxUpdateTimestamp: block.timestamp
+            price: msg.value
         }));
 
         emit ItemRented(_itemId, msg.sender, msg.value);
@@ -215,9 +217,10 @@ contract CommunityContract {
     
     struct Citizen {
         address citizenAddress;
-        uint256 balance;
+        int256 balance;
         uint256 tokens;
         RentedItemMetadata[] rentedItems;
+        uint256 lastTaxUpdateTimestamp;
     }
 
     struct RentedItemMetadata {
@@ -225,8 +228,6 @@ contract CommunityContract {
         uint256 rentedFrom;
         uint256 rentedUntil;
         uint256 price;
-
-        uint256 lastTaxUpdateTimestamp;
     }
     
     mapping(uint256 => Citizen) public citizens;
@@ -236,18 +237,25 @@ contract CommunityContract {
     
     event CitizenRegistered(address indexed citizenAddress, uint256 indexed citizenId);
     
-    function registerCitizen(address _citizenAddress, uint256 initialBalance) external {                
+    function registerCitizen(address _citizenAddress) external {                
         citizens[citizenCount] = Citizen({
             citizenAddress: _citizenAddress,
-            balance: initialBalance,
+            balance: 0,
             tokens: 0,
-            rentedItems: new RentedItemMetadata[](0)
+            rentedItems: new RentedItemMetadata[](0),
+            lastTaxUpdateTimestamp: block.timestamp
         });
         citizenIdByAddress[_citizenAddress] = citizenCount;
 
         citizenCount++;
         
         emit CitizenRegistered(msg.sender, citizenCount);
+    }
+
+    function depositFunds() external payable {
+        citizens[citizenIdByAddress[msg.sender]].balance += int256(msg.value);
+
+        emit CitizenDepositReceived(msg.sender, msg.value);
     }
 
     /* This function is triggered periodically to pay tax for each citizen
@@ -258,17 +266,22 @@ contract CommunityContract {
             for (uint256 j = 0; j < citizen.rentedItems.length; j++) {
                 RentedItemMetadata storage rentedItem = citizen.rentedItems[j];
 
-                uint256 usage = block.timestamp - rentedItem.lastTaxUpdateTimestamp;
-                if (rentedItem.rentedUntil != 0) {
-                    usage = rentedItem.rentedUntil - rentedItem.lastTaxUpdateTimestamp;
+                uint256 usageStart = citizen.lastTaxUpdateTimestamp;
+                if (rentedItem.rentedFrom > citizen.lastTaxUpdateTimestamp) {
+                    usageStart = rentedItem.rentedFrom;
                 }
 
-                uint256 amountToPay = rentedItem.price * (items[rentedItem.itemId].taxRate / 100) * usage / (block.timestamp - rentedItem.lastTaxUpdateTimestamp);
+                uint256 usageEnd = block.timestamp;
+                if (rentedItem.rentedUntil != 0) {
+                    usageEnd = rentedItem.rentedUntil;
+                }
 
-                citizen.balance -= amountToPay;
+                uint256 usage = usageEnd - usageStart;
+
+                uint256 amountToPay = rentedItem.price * (items[rentedItem.itemId].taxRate / 100) * usage / (block.timestamp - citizen.lastTaxUpdateTimestamp);
+
+                citizen.balance -= int256(amountToPay);
                 citizen.tokens += amountToPay;
-
-                rentedItem.lastTaxUpdateTimestamp = block.timestamp;
             }
 
             // delete released items from the citizen's rentedItems array
@@ -281,6 +294,8 @@ contract CommunityContract {
                     citizen.rentedItems.pop();
                 }
             }
+
+            citizen.lastTaxUpdateTimestamp = block.timestamp;
         }
     }
 }
