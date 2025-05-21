@@ -3,7 +3,6 @@ import {
   loadFixture,
 } from "@nomicfoundation/hardhat-toolbox/network-helpers";
 import { expect } from "chai";
-import hre from "hardhat";
 import { ethers } from "hardhat";
 
 describe("CommunityContract", function () {
@@ -12,11 +11,15 @@ describe("CommunityContract", function () {
     // Get signers
     const [admin, citizen1, citizen2] = await ethers.getSigners();
 
+    // Deploy the USDC token
+    const MockUSDC = await ethers.getContractFactory("MockUSDC");
+    const usdcToken = await MockUSDC.deploy();
+
     // Deploy the contract
     const CommunityContract = await ethers.getContractFactory(
       "CommunityContract"
     );
-    const communityContract = await CommunityContract.deploy(admin.address);
+    const communityContract = await CommunityContract.deploy(admin.address, await usdcToken.getAddress());
 
     // Test data
     const societyHash = ethers.keccak256(ethers.toUtf8Bytes("TestSociety"));
@@ -26,6 +29,7 @@ describe("CommunityContract", function () {
     return {
       communityContract,
       admin,
+      usdcToken,
       citizen1,
       citizen2,
       societyHash,
@@ -95,9 +99,9 @@ describe("CommunityContract", function () {
           societyHash,
           cityZoneHash,
           itemHash,
-          ethers.parseEther("1"), // initialPrice
-          ethers.parseEther("0.1"), // minimalPrice
-          ethers.parseEther("0.1"), // depreciationRate
+          1000000, // initialPrice (1 USDC)
+          100000, // minimalPrice (0.1 USDC)
+          100000, // depreciationRate (0.1 USDC)
           86400, // depreciationInterval (1 day)
           3600, // releaseInterval (1 hour)
           10 // taxRate
@@ -123,7 +127,7 @@ describe("CommunityContract", function () {
     });
 
     it("Should allow citizen to deposit funds", async function () {
-      const { communityContract, admin, citizen1, societyHash } =
+      const { communityContract, admin, citizen1, societyHash, usdcToken } =
         await loadFixture(deployCommunityContractFixture);
 
       await communityContract.connect(admin).addSociety(societyHash);
@@ -131,11 +135,17 @@ describe("CommunityContract", function () {
         .connect(admin)
         .registerCitizen(societyHash, citizen1.address);
 
-      const depositAmount = ethers.parseEther("1");
+      const depositAmount = 1000000; // 1 USDC
+      
+      // Transfer USDC to citizen1
+      await (usdcToken as any).connect(admin).transfer(citizen1.address, depositAmount);
+      
+      // Approve and deposit
+      await (usdcToken as any).connect(citizen1).approve(await communityContract.getAddress(), depositAmount);
       await expect(
         communityContract
           .connect(citizen1)
-          .depositFunds(societyHash, { value: depositAmount })
+          .depositFunds(societyHash, depositAmount)
       )
         .to.emit(communityContract, "CitizenDepositReceived")
         .withArgs(societyHash, citizen1.address, depositAmount);
@@ -145,7 +155,7 @@ describe("CommunityContract", function () {
   describe("Item Management", function () {
     async function setupItemFixture() {
       const base = await deployCommunityContractFixture();
-      const { communityContract, admin, societyHash, cityZoneHash, itemHash } =
+      const { communityContract, admin, societyHash, cityZoneHash, itemHash, usdcToken, citizen1 } =
         base;
 
       await communityContract.connect(admin).addSociety(societyHash);
@@ -156,9 +166,9 @@ describe("CommunityContract", function () {
         societyHash,
         cityZoneHash,
         itemHash,
-        ethers.parseEther("1"), // initialPrice
-        ethers.parseEther("0.1"), // minimalPrice
-        ethers.parseEther("0.1"), // depreciationRate
+        1000000, // initialPrice (1 USDC)
+        100000, // minimalPrice (0.1 USDC)
+        100000, // depreciationRate (0.1 USDC)
         86400, // depreciationInterval (1 day)
         3600, // releaseInterval (1 hour)
         10 // taxRate
@@ -176,7 +186,7 @@ describe("CommunityContract", function () {
         cityZoneHash,
         itemHash
       );
-      expect(price).to.equal(ethers.parseEther("1")); // Should be initial price since no time has passed
+      expect(price).to.equal(1000000); // Should be initial price (1 USDC) since no time has passed
     });
 
     it("Should allow renting an item", async function () {
@@ -186,16 +196,25 @@ describe("CommunityContract", function () {
         societyHash,
         cityZoneHash,
         itemHash,
+        usdcToken,
+        admin,
       } = await loadFixture(setupItemFixture);
 
       // Register and fund citizen1
       await communityContract.registerCitizen(societyHash, citizen1.address);
+      const depositAmount = 2000000; // 2 USDC
+      
+      // Transfer USDC to citizen1
+      await (usdcToken as any).connect(admin).transfer(citizen1.address, depositAmount);
+      
+      // Approve and deposit
+      await (usdcToken as any).connect(citizen1).approve(await communityContract.getAddress(), depositAmount);
       await communityContract
         .connect(citizen1)
-        .depositFunds(societyHash, { value: ethers.parseEther("2") });
+        .depositFunds(societyHash, depositAmount);
 
       // Rent the item
-      const newPrice = ethers.parseEther("1.5");
+      const newPrice = 1500000; // 1.5 USDC
       await expect(
         communityContract
           .connect(citizen1)

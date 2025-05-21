@@ -44,7 +44,10 @@ contract CommunityContract {
     /* Withdrawal of the funds is guarded by the multisig account
      */
     function withdrawFunds(uint256 amount, address to) external onlyAdmin {
-        require(usdcToken.transfer(to, amount), "USDC transfer failed");
+        bool success = usdcToken.transfer(to, amount);
+        if (!success) {
+            revert ErrorPaymentFailed();
+        }
     }
 
     // ======= Data Structures =======
@@ -399,7 +402,11 @@ contract CommunityContract {
             revert ErrorCitizenDoesNotExist(_societyHash, msg.sender);
         }
 
-        require(usdcToken.transferFrom(msg.sender, address(this), amount), "USDC transfer failed");
+        bool success = usdcToken.transferFrom(msg.sender, address(this), amount);
+        if (!success) {
+            revert ErrorPaymentFailed();
+        }
+
         society.citizens[citizenId].balance += int256(amount);
         
         emit CitizenDepositReceived(_societyHash, msg.sender, amount);
