@@ -1,23 +1,30 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.0;
 
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
 contract CommunityContract {
     // ======= Admin Management ======= 
 
     // This should be a MultiSignerERC7913Weighted multisig account
     address public admin;
+    IERC20 public usdcToken;
     
     event AdminChanged(address indexed previousAdmin, address indexed newAdmin);
+    event USDCAddressChanged(address indexed previousUSDC, address indexed newUSDC);
     
     modifier onlyAdmin() {
         require(msg.sender == admin, "Only admin can call this function");
         _;
     }
     
-    constructor(address _admin) {
+    constructor(address _admin, address _usdcToken) {
         require(_admin != address(0), "Admin address cannot be zero");
+        require(_usdcToken != address(0), "USDC token address cannot be zero");
         admin = _admin;
+        usdcToken = IERC20(_usdcToken);
         emit AdminChanged(address(0), _admin);
+        emit USDCAddressChanged(address(0), _usdcToken);
     }
     
     function changeAdmin(address _newAdmin) external onlyAdmin {
@@ -27,15 +34,17 @@ contract CommunityContract {
         emit AdminChanged(oldAdmin, _newAdmin);
     }
 
-    receive() external payable {}
+    function changeUSDCAddress(address _newUSDC) external onlyAdmin {
+        require(_newUSDC != address(0), "New USDC address cannot be zero");
+        address oldUSDC = address(usdcToken);
+        usdcToken = IERC20(_newUSDC);
+        emit USDCAddressChanged(oldUSDC, _newUSDC);
+    }
 
     /* Withdrawal of the funds is guarded by the multisig account
      */
     function withdrawFunds(uint256 amount, address to) external onlyAdmin {
-        (bool success, ) = to.call{value: amount}("");
-        if (!success) {
-            revert ErrorPaymentFailed();
-        }
+        require(usdcToken.transfer(to, amount), "USDC transfer failed");
     }
 
     // ======= Data Structures =======
@@ -217,7 +226,7 @@ contract CommunityContract {
 
     /* This function is called by the citizen to rent the item
     */
-    function rentItem(bytes32 _societyHash, bytes32 _cityZoneHash, bytes32 _itemHash, uint256 _newPrice) external payable {
+    function rentItem(bytes32 _societyHash, bytes32 _cityZoneHash, bytes32 _itemHash, uint256 _newPrice) external {
         uint256 societyId = societyIdByHash[_societyHash];
         if (societyId == 0) {
             revert ErrorSocietyDoesNotExist(_societyHash);
@@ -378,7 +387,7 @@ contract CommunityContract {
 
     /* This function is called by the citizen to deposit funds into their balance
     */
-    function depositFunds(bytes32 _societyHash) external payable {
+    function depositFunds(bytes32 _societyHash, uint256 amount) external {
         uint256 societyId = societyIdByHash[_societyHash];
         if (societyId == 0) {
             revert ErrorSocietyDoesNotExist(_societyHash);
@@ -390,9 +399,10 @@ contract CommunityContract {
             revert ErrorCitizenDoesNotExist(_societyHash, msg.sender);
         }
 
-        society.citizens[citizenId].balance += int256(msg.value);
-
-        emit CitizenDepositReceived(_societyHash, msg.sender, msg.value);
+        require(usdcToken.transferFrom(msg.sender, address(this), amount), "USDC transfer failed");
+        society.citizens[citizenId].balance += int256(amount);
+        
+        emit CitizenDepositReceived(_societyHash, msg.sender, amount);
     }
 
     /* This function is triggered periodically to pay tax for each citizen
