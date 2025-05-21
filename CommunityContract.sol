@@ -27,6 +27,8 @@ contract CommunityContract {
         emit AdminChanged(oldAdmin, _newAdmin);
     }
 
+    receive() external payable {}
+
     // ======= Item Management =======
 
     struct Item {
@@ -36,12 +38,12 @@ contract CommunityContract {
         uint256 minimalPrice;
         uint256 depreciationRate;
         uint256 depreciationInterval;
-        uint256 lastReleaseTimestamp;
         // if item gets rerented by another citizen, this is the notice period for the current item holder
-        uint256 releaseInterval;
+        uint256 noticePeriod;
         uint256 taxRate;
 
         // Info about the current rent
+        uint256 lastReleaseTimestamp;
         bool isRented;
         address rentedByCitizenAddress;
         uint256 currentPrice;
@@ -88,7 +90,7 @@ contract CommunityContract {
             taxRate: _taxRate,
             // Initially lastReleaseTimestamp is equal to creation timestamp
             lastReleaseTimestamp: block.timestamp,
-            releaseInterval: _releaseInterval,
+            noticePeriod: _releaseInterval,
             isRented: false,
             rentedByCitizenAddress: address(0),
             currentPrice: _initialPrice
@@ -116,30 +118,40 @@ contract CommunityContract {
         }
 
         uint256 currentPrice = getItemPrice(_itemId);
+        uint256 newRenterCitizenId = citizenIdByAddress[msg.sender];
 
-        if (msg.value != currentPrice) {
+        if (citizens[newRenterCitizenId].balance < int256(currentPrice)) {
             revert ErrorInsufficientBalanceToRent(currentPrice, msg.value);
         }
 
-        uint256 citizenId = citizenIdByAddress[msg.sender];
+        if (item.isRented) {
+            // if item is rented, refund the previous renter
+            uint256 oldRenterCitizenId = citizenIdByAddress[item.rentedByCitizenAddress];
+            citizens[oldRenterCitizenId].balance += int256(item.currentPrice);
 
-        (bool success, ) = admin.call{value: msg.value}("");
-        if (!success) {
-            revert ErrorPaymentFailed();
+            for (uint256 i = 0; i < citizens[oldRenterCitizenId].rentedItems.length; i++) {
+                RentedItemMetadata storage rentedItem = citizens[oldRenterCitizenId].rentedItems[i];
+                if (rentedItem.itemId == _itemId) {
+                    rentedItem.rentedUntil = block.timestamp + item.noticePeriod;
+                    break;
+                }
+            }
         }
+
+        citizens[newRenterCitizenId].balance -= int256(currentPrice);
 
         item.currentPrice = _newPrice;
         item.rentedByCitizenAddress = msg.sender;
         item.isRented = true;
 
-        citizens[citizenId].rentedItems.push(RentedItemMetadata({
+        citizens[newRenterCitizenId].rentedItems.push(RentedItemMetadata({
             itemId: _itemId,
-            rentedFrom: block.timestamp,
+            rentedFrom: block.timestamp + item.noticePeriod,
             rentedUntil: 0,
-            price: msg.value
+            price: _newPrice
         }));
 
-        emit ItemRented(_itemId, msg.sender, msg.value);
+        emit ItemRented(_itemId, msg.sender, _newPrice);
     }
 
     function releaseItem(uint256 _itemId) external {
@@ -157,16 +169,14 @@ contract CommunityContract {
             revert ErrorItemIsNotRentedBySender(_itemId, msg.sender);
         }
 
-        (bool success, ) = item.rentedByCitizenAddress.call{value: item.currentPrice}("");
-        if (!success) {
-            revert ErrorPaymentFailed();
-        }
+        uint256 citizenId = citizenIdByAddress[msg.sender];
+        citizens[citizenId].balance += int256(item.currentPrice);
 
         item.isRented = false;
         item.lastReleaseTimestamp = block.timestamp;
         item.rentedByCitizenAddress = address(0);
+        item.currentPrice = item.initialPrice;
 
-        uint256 citizenId = citizenIdByAddress[msg.sender];
         for (uint256 i = 0; i < citizens[citizenId].rentedItems.length; i++) {
             RentedItemMetadata storage rentedItem = citizens[citizenId].rentedItems[i];
             if (rentedItem.itemId == _itemId) {
@@ -252,6 +262,8 @@ contract CommunityContract {
         emit CitizenRegistered(msg.sender, citizenCount);
     }
 
+    /* This function is called by the citizen to deposit funds into their balance
+    */
     function depositFunds() external payable {
         citizens[citizenIdByAddress[msg.sender]].balance += int256(msg.value);
 
@@ -296,6 +308,15 @@ contract CommunityContract {
             }
 
             citizen.lastTaxUpdateTimestamp = block.timestamp;
+        }
+    }
+
+    /* Withdrawal of the funds is guarded by the multisig account
+     */
+    function withdrawFunds(uint256 amount, address to) external onlyAdmin {
+        (bool success, ) = to.call{value: amount}("");
+        if (!success) {
+            revert ErrorPaymentFailed();
         }
     }
 }
