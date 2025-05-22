@@ -9,6 +9,27 @@ contract WeightedMultisigAccount is MultiSignerERC7913Weighted {
     event ActionProposed(bytes32 indexed actionHash);
     event ActionExecuted(bytes32 indexed actionHash);
 
+    error ActionAlreadyProposed(bytes32 actionHash);
+    error NotSigner();
+    error ActionNotProposed(bytes32 actionHash);
+    error ActionAlreadyExecuted(bytes32 actionHash);
+    error AlreadyVoted(bytes32 actionHash);
+    error ActionFailed(bytes32 actionHash);
+
+    struct Action {
+        address target;
+        uint256 value;
+        bytes callData;
+
+        bool executed;
+
+        uint256 votedCount;
+        mapping(uint256 => address) voted;
+    }
+
+    // maps action keccak256 hash to action
+    mapping(bytes32 => Action) public actions;
+
     constructor(
         address[] memory signers,
         uint256[] memory weights,
@@ -16,39 +37,86 @@ contract WeightedMultisigAccount is MultiSignerERC7913Weighted {
     ) {
         require(signers.length == weights.length, "Mismatch");
 
-        bytes[] memory encodedSigners = _encodeAddressesToBytes(signers);
+        bytes[] memory encodedSigners = new bytes[](signers.length);
+        for (uint256 i = 0; i < signers.length; i++) {
+            encodedSigners[i] = abi.encodePacked(signers[i]);
+        }
+
         _addSigners(encodedSigners);
         _setSignerWeights(encodedSigners, weights);
         _setThreshold(threshold);
         owner = msg.sender;
     }
 
-    function _encodeAddressesToBytes(address[] memory addresses) internal pure returns (bytes[] memory) {
-        bytes[] memory result = new bytes[](addresses.length);
-        for (uint i = 0; i < addresses.length; i++) {
-            result[i] = abi.encodePacked(addresses[i]);
-        }
-        return result;
-    }
-
     function addSigner(address signer, uint256 weight) external {
-        address[] memory signers = new address[](1);
-        signers[0] = signer;
-        bytes[] memory encodedSigners = _encodeAddressesToBytes(signers);
-        _addSigners(encodedSigners);
+        bytes[] memory signers = new bytes[](1);
+        signers[0] = abi.encodePacked(signer);
+        _addSigners(signers);
         
         uint256[] memory weights = new uint256[](1);
         weights[0] = weight;
-        _setSignerWeights(encodedSigners, weights);
+        _setSignerWeights(signers, weights);
     }
 
-    function executeAction(bytes32 actionHash, address[] memory voters) external returns (bool) {
-        bytes[] memory encodedVoters = _encodeAddressesToBytes(voters);
-        if (_validateThreshold(encodedVoters)) {
-            return true;
+    function proposeAction(address target, uint256 value, bytes memory callData) external {
+        bytes32 actionHash = keccak256(abi.encodePacked(target, value, callData));
+
+        if (actions[actionHash].target != address(0)) {
+            revert ActionAlreadyProposed(actionHash);
         }
-        return false;
+
+        Action storage action = actions[actionHash];
+        action.target = target;
+        action.value = value;
+        action.callData = callData;
+        action.executed = false;
+
+        emit ActionProposed(actionHash);
     }
 
-    receive() external payable {}
+    function voteOnAction(bytes32 actionHash) external onlySigner {
+        Action storage action = actions[actionHash];
+
+        if (action.target == address(0)) {
+            revert ActionNotProposed(actionHash);
+        }
+
+        if (action.executed) {
+            revert ActionAlreadyExecuted(actionHash);
+        }
+
+        // check if signer has already voted
+        for (uint256 i = 0; i < action.votedCount; i++) {
+            if (action.voted[i] == msg.sender) {
+                revert AlreadyVoted(actionHash);
+            }
+        }
+
+        action.voted[action.votedCount] = msg.sender;
+        action.votedCount++;
+
+        bytes[] memory encodedVoters = new bytes[](action.votedCount);
+        for (uint256 i = 0; i < action.votedCount; i++) {
+            encodedVoters[i] = abi.encodePacked(action.voted[i]);
+        }
+
+        if (_validateThreshold(encodedVoters)) {
+            action.executed = true;
+
+            // execute action
+            (bool success, ) = action.target.call{value: action.value}(action.callData);
+            if (!success) {
+                revert ActionFailed(actionHash);
+            }
+
+            emit ActionExecuted(actionHash);
+        }
+    }
+
+    modifier onlySigner() {
+        if (!isSigner(abi.encodePacked(msg.sender))) {
+            revert NotSigner();
+        }
+        _;
+    }
 }
