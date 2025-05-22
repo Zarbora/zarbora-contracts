@@ -404,7 +404,7 @@ contract CommunityContract {
         society.citizenIdByAddress[_citizenAddress] = society.citizenCount;
 
         WeightedMultisigAccount multisig = WeightedMultisigAccount(admin);
-        multisig.addSigner(_citizenAddress, 10);
+        multisig.addSigner(_citizenAddress, 100);
 
         emit CitizenRegistered(_societyHash, _citizenAddress, society.citizenCount);
     }

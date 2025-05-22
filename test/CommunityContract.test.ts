@@ -9,22 +9,33 @@ describe("CommunityContract", function () {
   // We define a fixture to reuse the same setup in every test.
   async function deployCommunityContractFixture() {
     // Get signers
-    const [admin, citizen1, citizen2] = await ethers.getSigners();
+    const [citizen1, citizen2, citizen3, nonCitizen] = await ethers.getSigners();
 
     // Deploy the USDC token
     const MockUSDC = await ethers.getContractFactory("MockUSDC");
     const usdcToken = await MockUSDC.deploy();
 
+    const WeightedMultisigAccount = await ethers.getContractFactory("WeightedMultisigAccount");
+    const admin = await WeightedMultisigAccount.deploy(200);
+
     // Deploy the contract
     const CommunityContract = await ethers.getContractFactory(
       "CommunityContract"
     );
-    const communityContract = await CommunityContract.deploy(admin.address, await usdcToken.getAddress());
+    const communityContract = await CommunityContract.deploy(
+      await admin.getAddress(), 
+      await usdcToken.getAddress()
+    );
 
     // Test data
     const societyHash = ethers.keccak256(ethers.toUtf8Bytes("TestSociety"));
     const cityZoneHash = ethers.keccak256(ethers.toUtf8Bytes("TestCityZone"));
     const itemHash = ethers.keccak256(ethers.toUtf8Bytes("TestItem"));
+
+    await communityContract.connect(citizen1).addSociety(societyHash);
+    await communityContract.registerCitizen(societyHash, citizen1.address);
+    await communityContract.registerCitizen(societyHash, citizen2.address);
+    await communityContract.registerCitizen(societyHash, citizen3.address);
 
     return {
       communityContract,
@@ -32,6 +43,8 @@ describe("CommunityContract", function () {
       usdcToken,
       citizen1,
       citizen2,
+      citizen3,
+      nonCitizen,
       societyHash,
       cityZoneHash,
       itemHash,
@@ -43,22 +56,38 @@ describe("CommunityContract", function () {
       const { communityContract, admin } = await loadFixture(
         deployCommunityContractFixture
       );
-      expect(await communityContract.admin()).to.equal(admin.address);
+      expect(await communityContract.admin()).to.equal(await admin.getAddress());
     });
   });
 
   describe("Admin Management", function () {
     it("Should allow admin to change admin", async function () {
-      const { communityContract, admin, citizen1 } = await loadFixture(
+      const { communityContract, admin, citizen1, citizen3 } = await loadFixture(
         deployCommunityContractFixture
       );
 
-      await expect(
-        communityContract.connect(admin).changeAdmin(citizen1.address)
-      )
-        .to.emit(communityContract, "AdminChanged")
-        .withArgs(admin.address, citizen1.address);
+      // Create call data for changeAdmin function
+      const changeAdminInterface = new ethers.Interface(["function changeAdmin(address _newAdmin)"]);
+      const changeAdminData = changeAdminInterface.encodeFunctionData("changeAdmin", [citizen1.address]);
+      
+      // Get action hash for voting
+      const actionHash = ethers.solidityPackedKeccak256(
+        ["address", "uint256", "bytes"],
+        [await communityContract.getAddress(), 0, changeAdminData]
+      );
 
+      // Propose action through the multisig
+      await admin.connect(citizen1).proposeAction(
+        await communityContract.getAddress(), 
+        0, 
+        changeAdminData
+      );
+
+      // Vote on the action - citizen3 has enough weight to pass threshold with citizen1
+      await admin.connect(citizen1).voteOnAction(actionHash);
+      await admin.connect(citizen3).voteOnAction(actionHash);
+
+      // Verify admin was changed
       expect(await communityContract.admin()).to.equal(citizen1.address);
     });
 
@@ -75,27 +104,29 @@ describe("CommunityContract", function () {
 
   describe("Society Management", function () {
     it("Should allow admin to add society", async function () {
-      const { communityContract, admin, societyHash } = await loadFixture(
+      const { communityContract, citizen1 } = await loadFixture(
         deployCommunityContractFixture
       );
 
-      await communityContract.connect(admin).addSociety(societyHash);
-      expect(await communityContract.societyCount()).to.equal(1);
+      const newSocietyHash = ethers.keccak256(ethers.toUtf8Bytes("TestAddNewSociety"));
+
+      await communityContract.connect(citizen1).addSociety(newSocietyHash);
+      expect(await communityContract.societyCount()).to.equal(2);
     });
 
     it("Should allow admin to add city zone to society", async function () {
-      const { communityContract, admin, societyHash, cityZoneHash, itemHash } =
+      const { communityContract, citizen1, societyHash, cityZoneHash, itemHash } =
         await loadFixture(deployCommunityContractFixture);
 
-      await communityContract.connect(admin).addSociety(societyHash);
+      await communityContract.connect(citizen1).addSociety(societyHash);
       await communityContract
-        .connect(admin)
+        .connect(citizen1)
         .addCityZone(societyHash, cityZoneHash);
 
       // We can't directly check cityZoneCount due to struct mapping limitations
       // but we can verify that we can add an item to this city zone
       await expect(
-        communityContract.connect(admin).addItem(
+        communityContract.connect(citizen1).addItem(
           societyHash,
           cityZoneHash,
           itemHash,
@@ -112,34 +143,26 @@ describe("CommunityContract", function () {
 
   describe("Citizen Management", function () {
     it("Should allow registering a new citizen", async function () {
-      const { communityContract, admin, citizen1, societyHash } =
+      const { communityContract, nonCitizen, societyHash } =
         await loadFixture(deployCommunityContractFixture);
 
-      await communityContract.connect(admin).addSociety(societyHash);
+      await communityContract.connect(nonCitizen).addSociety(societyHash);
 
       await expect(
         communityContract
-          .connect(admin)
-          .registerCitizen(societyHash, citizen1.address)
+          .connect(nonCitizen)
+          .registerCitizen(societyHash, nonCitizen.address)
       )
         .to.emit(communityContract, "CitizenRegistered")
-        .withArgs(societyHash, citizen1.address, 1); // 1 is the expected citizenId
+        .withArgs(societyHash, nonCitizen.address, 1); // 1 is the expected citizenId
     });
 
     it("Should allow citizen to deposit funds", async function () {
-      const { communityContract, admin, citizen1, societyHash, usdcToken } =
+      const { communityContract, citizen1, societyHash, usdcToken } =
         await loadFixture(deployCommunityContractFixture);
 
-      await communityContract.connect(admin).addSociety(societyHash);
-      await communityContract
-        .connect(admin)
-        .registerCitizen(societyHash, citizen1.address);
-
       const depositAmount = 1000000; // 1 USDC
-      
-      // Transfer USDC to citizen1
-      await (usdcToken as any).connect(admin).transfer(citizen1.address, depositAmount);
-      
+            
       // Approve and deposit
       await (usdcToken as any).connect(citizen1).approve(await communityContract.getAddress(), depositAmount);
       await expect(
@@ -155,14 +178,14 @@ describe("CommunityContract", function () {
   describe("Item Management", function () {
     async function setupItemFixture() {
       const base = await deployCommunityContractFixture();
-      const { communityContract, admin, societyHash, cityZoneHash, itemHash, usdcToken, citizen1 } =
+      const { communityContract, societyHash, cityZoneHash, itemHash, usdcToken, citizen1 } =
         base;
 
-      await communityContract.connect(admin).addSociety(societyHash);
       await communityContract
-        .connect(admin)
+        .connect(citizen1)
         .addCityZone(societyHash, cityZoneHash);
-      await communityContract.connect(admin).addItem(
+
+      await communityContract.connect(citizen1).addItem(
         societyHash,
         cityZoneHash,
         itemHash,
@@ -200,15 +223,14 @@ describe("CommunityContract", function () {
         admin,
       } = await loadFixture(setupItemFixture);
 
-      // Register and fund citizen1
-      await communityContract.registerCitizen(societyHash, citizen1.address);
       const depositAmount = 2000000; // 2 USDC
       
       // Transfer USDC to citizen1
-      await (usdcToken as any).connect(admin).transfer(citizen1.address, depositAmount);
+      await (usdcToken as any).transfer(citizen1.address, depositAmount);
       
       // Approve and deposit
       await (usdcToken as any).connect(citizen1).approve(await communityContract.getAddress(), depositAmount);
+      
       await communityContract
         .connect(citizen1)
         .depositFunds(societyHash, depositAmount);

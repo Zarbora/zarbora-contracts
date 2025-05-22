@@ -37,22 +37,9 @@ contract WeightedMultisigAccount is MultiSignerERC7913Weighted {
     // maps action keccak256 hash to action data
     mapping(bytes32 => Action) public actions;
 
-    constructor(
-        address[] memory signers,
-        uint256[] memory weights,
-        uint256 threshold
-    ) {
-        require(signers.length == weights.length, "Mismatch");
-
-        bytes[] memory encodedSigners = new bytes[](signers.length);
-        for (uint256 i = 0; i < signers.length; i++) {
-            encodedSigners[i] = abi.encodePacked(signers[i]);
-        }
-
-        _addSigners(encodedSigners);
-        _setSignerWeights(encodedSigners, weights);
-        _setThreshold(threshold);
+    constructor(uint256 newThreshold) {
         owner = msg.sender;
+        _setThreshold(newThreshold);
     }
 
     function addSigner(address signer, uint256 weight) external {
@@ -71,10 +58,18 @@ contract WeightedMultisigAccount is MultiSignerERC7913Weighted {
 
         uint256[] memory weights = new uint256[](1);
         weights[0] = weight;
-        
+
         _setSignerWeights(signers, weights);
     }
 
+    function _validateReachableThreshold() internal view override {
+        // do nothing
+    }
+
+    function setThreshold(uint256 newThreshold) external {
+        _setThreshold(newThreshold);
+    }
+        
     function proposeAction(address target, uint256 value, bytes memory callData) external {
         bytes32 actionHash = keccak256(abi.encodePacked(target, value, callData));
 
