@@ -75,6 +75,7 @@ contract CommunityContract {
         bytes32 itemHash;
         uint256 initialPrice;
         uint256 minimalPrice;
+        bool isDepreciationEnabled;
         uint256 depreciationRate;
         uint256 depreciationInterval;
         // if item gets rerented by another citizen, this is the notice period for the current item holder
@@ -144,6 +145,8 @@ contract CommunityContract {
     mapping(uint256 => Society) public societies;
     mapping(bytes32 => uint256) societyIdByHash;
 
+    // ======= Getters / Setters =======
+
     function addSociety(bytes32 _societyHash) external {
         societyCount++;
 
@@ -181,7 +184,8 @@ contract CommunityContract {
         uint256 _depreciationRate,
         uint256 _depreciationInterval,
         uint256 _releaseInterval,
-        uint256 _taxRate
+        uint256 _taxRate,
+        bool _isDepreciationEnabled
     ) external {
         require(_initialPrice > 0, "Initial price must be greater than 0");
         require(_minimalPrice > 0, "Minimal price must be greater than 0");
@@ -209,6 +213,7 @@ contract CommunityContract {
             itemHash: _itemHash,
             initialPrice: _initialPrice,
             minimalPrice: _minimalPrice,
+            isDepreciationEnabled: _isDepreciationEnabled,
             depreciationRate: _depreciationRate,
             depreciationInterval: _depreciationInterval,
             taxRate: _taxRate,
@@ -370,6 +375,10 @@ contract CommunityContract {
 
         if (item.isRented) {
             return item.currentPrice;
+        }
+
+        if (!item.isDepreciationEnabled) {
+            return item.initialPrice;
         }
 
         // item is unoccupied, apply depreciation logic based on the Dutch Auction model

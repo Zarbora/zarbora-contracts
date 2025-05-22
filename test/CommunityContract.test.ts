@@ -135,7 +135,8 @@ describe("CommunityContract", function () {
           100000, // depreciationRate (0.1 USDC)
           86400, // depreciationInterval (1 day)
           3600, // releaseInterval (1 hour)
-          10 // taxRate
+          10, // taxRate
+          true // isDepreciationEnabled
         )
       ).to.not.be.reverted;
     });
@@ -194,7 +195,8 @@ describe("CommunityContract", function () {
         100000, // depreciationRate (0.1 USDC)
         86400, // depreciationInterval (1 day)
         3600, // releaseInterval (1 hour)
-        10 // taxRate
+        10, // taxRate
+        true // isDepreciationEnabled
       );
 
       return { ...base };
