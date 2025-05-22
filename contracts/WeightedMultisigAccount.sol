@@ -16,6 +16,13 @@ contract WeightedMultisigAccount is MultiSignerERC7913Weighted {
     error AlreadyVoted(bytes32 actionHash);
     error ActionFailed(bytes32 actionHash);
 
+    modifier onlySigner() {
+        if (!isSigner(abi.encodePacked(msg.sender))) {
+            revert NotSigner();
+        }
+        _;
+    }
+
     struct Action {
         address target;
         uint256 value;
@@ -27,7 +34,7 @@ contract WeightedMultisigAccount is MultiSignerERC7913Weighted {
         mapping(uint256 => address) voted;
     }
 
-    // maps action keccak256 hash to action
+    // maps action keccak256 hash to action data
     mapping(bytes32 => Action) public actions;
 
     constructor(
@@ -111,12 +118,5 @@ contract WeightedMultisigAccount is MultiSignerERC7913Weighted {
 
             emit ActionExecuted(actionHash);
         }
-    }
-
-    modifier onlySigner() {
-        if (!isSigner(abi.encodePacked(msg.sender))) {
-            revert NotSigner();
-        }
-        _;
     }
 }

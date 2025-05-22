@@ -2,7 +2,7 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "lib/community-contracts/contracts/utils/cryptography/MultiSignerERC7913Weighted.sol";
+import "./WeightedMultisigAccount.sol";
 
 contract CommunityContract {
     // ======= Admin Management ======= 
@@ -49,6 +49,22 @@ contract CommunityContract {
         if (!success) {
             revert ErrorPaymentFailed();
         }
+    }
+
+    /* Called by the citizen to propose an action to be voted on
+    */
+    function actionProposed(address target, uint256 value, bytes memory callData) external {
+        WeightedMultisigAccount multisig = WeightedMultisigAccount(admin);
+
+        multisig.proposeAction(target, value, callData);
+    }
+
+    /* Called by the citizen to vote on an action
+    */
+    function voteOnAction(bytes32 actionHash) external {
+        WeightedMultisigAccount multisig = WeightedMultisigAccount(admin);
+        
+        multisig.voteOnAction(actionHash);
     }
 
     // ======= Data Structures =======
@@ -127,7 +143,7 @@ contract CommunityContract {
     mapping(uint256 => Society) public societies;
     mapping(bytes32 => uint256) societyIdByHash;
 
-    function addSociety(bytes32 _societyHash) external onlyAdmin {
+    function addSociety(bytes32 _societyHash) external {
         societyCount++;
 
         Society storage society = societies[societyCount];
@@ -137,7 +153,7 @@ contract CommunityContract {
         societyIdByHash[_societyHash] = societyCount;
     }
 
-    function addCityZone(bytes32 _societyHash, bytes32 _cityZoneHash) external onlyAdmin {
+    function addCityZone(bytes32 _societyHash, bytes32 _cityZoneHash) external {
         uint256 societyId = societyIdByHash[_societyHash];
         if (societyId == 0) {
             revert ErrorSocietyDoesNotExist(_societyHash);
@@ -165,7 +181,7 @@ contract CommunityContract {
         uint256 _depreciationInterval,
         uint256 _releaseInterval,
         uint256 _taxRate
-    ) external onlyAdmin {
+    ) external {
         require(_initialPrice > 0, "Initial price must be greater than 0");
         require(_minimalPrice > 0, "Minimal price must be greater than 0");
         require(_minimalPrice <= _initialPrice, "Minimal price cannot be greater than initial price");
