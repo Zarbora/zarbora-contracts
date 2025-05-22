@@ -24,6 +24,7 @@ contract CommunityContract {
         require(_usdcToken != address(0), "USDC token address cannot be zero");
         admin = _admin;
         usdcToken = IERC20(_usdcToken);
+
         emit AdminChanged(address(0), _admin);
         emit USDCAddressChanged(address(0), _usdcToken);
     }
@@ -63,7 +64,7 @@ contract CommunityContract {
     */
     function voteOnAction(bytes32 actionHash) external {
         WeightedMultisigAccount multisig = WeightedMultisigAccount(admin);
-        
+
         multisig.voteOnAction(actionHash);
     }
 
@@ -401,6 +402,9 @@ contract CommunityContract {
         citizen.lastTaxUpdateTimestamp = block.timestamp;
 
         society.citizenIdByAddress[_citizenAddress] = society.citizenCount;
+
+        WeightedMultisigAccount multisig = WeightedMultisigAccount(admin);
+        multisig.addSigner(_citizenAddress, 10);
 
         emit CitizenRegistered(_societyHash, _citizenAddress, society.citizenCount);
     }

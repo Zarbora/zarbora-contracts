@@ -65,6 +65,16 @@ contract WeightedMultisigAccount is MultiSignerERC7913Weighted {
         _setSignerWeights(signers, weights);
     }
 
+    function changeSignerWeight(address signer, uint256 weight) external {
+        bytes[] memory signers = new bytes[](1);
+        signers[0] = abi.encodePacked(signer);
+
+        uint256[] memory weights = new uint256[](1);
+        weights[0] = weight;
+        
+        _setSignerWeights(signers, weights);
+    }
+
     function proposeAction(address target, uint256 value, bytes memory callData) external {
         bytes32 actionHash = keccak256(abi.encodePacked(target, value, callData));
 
