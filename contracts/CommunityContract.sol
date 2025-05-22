@@ -2,6 +2,7 @@
 pragma solidity ^0.8.0;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "lib/community-contracts/contracts/utils/cryptography/MultiSignerERC7913Weighted.sol";
 
 contract CommunityContract {
     // ======= Admin Management ======= 
